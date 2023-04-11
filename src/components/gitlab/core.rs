@@ -142,7 +142,7 @@ impl GitLabGlue {
                     let mut summary = PlanSummary::new(&label);
                     let members = self.get_group_members(&group.full_path).await?;
                     for member in &members {
-                        if is_archlinux_bot(&member) {
+                        if is_archlinux_bot(member) {
                             continue;
                         }
 
@@ -199,7 +199,7 @@ impl GitLabGlue {
                             .await?;
 
                         for member in &members {
-                            if is_archlinux_bot(&member) {
+                            if is_archlinux_bot(member) {
                                 continue;
                             }
 
@@ -250,16 +250,20 @@ impl GitLabGlue {
         let mut summary = PlanSummary::new("GitLab 'Arch Linux' group members");
         let state = self.state.lock().await;
 
-        let gitlab_group_member_names = archlinux_group_members
-            .iter()
-            .map(|e| e.username.clone())
-            .collect::<Vec<_>>();
-
         for staff in state.staff() {
-            if !gitlab_group_member_names.contains(&staff.username) {
-                if self
-                    .add_group_member(action, &staff, group, DEFAULT_ARCH_LINUX_GROUP_ACCESS_LEVEL)
-                    .await?
+            if let Some(gitlab_id) = staff.gitlab_id {
+                if !archlinux_group_members
+                    .iter()
+                    .map(|e| e.id)
+                    .any(|e| e == gitlab_id)
+                    && self
+                        .add_group_member(
+                            action,
+                            staff,
+                            group,
+                            DEFAULT_ARCH_LINUX_GROUP_ACCESS_LEVEL,
+                        )
+                        .await?
                 {
                     summary.add += 1;
                 }
@@ -267,7 +271,7 @@ impl GitLabGlue {
         }
 
         for member in &archlinux_group_members {
-            if is_archlinux_bot(&member) {
+            if is_archlinux_bot(member) {
                 continue;
             }
             match state.staff_from_gitlab_id(member.id) {
@@ -309,16 +313,15 @@ impl GitLabGlue {
         let mut summary = PlanSummary::new("GitLab 'Arch Linux/Teams/Staff' group members");
         let state = self.state.lock().await;
 
-        let gitlab_group_member_names = archlinux_group_members
-            .iter()
-            .map(|e| e.username.clone())
-            .collect::<Vec<_>>();
-
         for staff in state.staff() {
-            if !gitlab_group_member_names.contains(&staff.username) {
-                if self
-                    .add_group_member(action, &staff, group, DEFAULT_STAFF_GROUP_ACCESS_LEVEL)
-                    .await?
+            if let Some(gitlab_id) = staff.gitlab_id {
+                if !archlinux_group_members
+                    .iter()
+                    .map(|e| e.id)
+                    .any(|e| e == gitlab_id)
+                    && self
+                        .add_group_member(action, staff, group, DEFAULT_STAFF_GROUP_ACCESS_LEVEL)
+                        .await?
                 {
                     summary.add += 1;
                 }
@@ -326,7 +329,7 @@ impl GitLabGlue {
         }
 
         for member in &archlinux_group_members {
-            if is_archlinux_bot(&member) {
+            if is_archlinux_bot(member) {
                 continue;
             }
             match state.staff_from_gitlab_id(member.id) {
@@ -366,22 +369,18 @@ impl GitLabGlue {
         let devops_group = "archlinux/teams/devops";
         let group_members = self.get_group_members(devops_group).await?;
 
-        let group_member_names = group_members
-            .iter()
-            .map(|e| e.username.clone())
-            .collect::<Vec<_>>();
-
         let state = self.state.lock().await;
         for staff in state.devops() {
-            if !group_member_names.contains(&staff.username) {
-                if self
-                    .add_group_member(
-                        action,
-                        &staff,
-                        devops_group,
-                        DEVOPS_INFRASTRUCTURE_ACCESS_LEVEL,
-                    )
-                    .await?
+            if let Some(gitlab_id) = staff.gitlab_id {
+                if !group_members.iter().map(|e| e.id).any(|e| e == gitlab_id)
+                    && self
+                        .add_group_member(
+                            action,
+                            staff,
+                            devops_group,
+                            DEVOPS_INFRASTRUCTURE_ACCESS_LEVEL,
+                        )
+                        .await?
                 {
                     summary.add += 1;
                 }
@@ -389,7 +388,7 @@ impl GitLabGlue {
         }
 
         for member in &group_members {
-            if is_archlinux_bot(&member) {
+            if is_archlinux_bot(member) {
                 continue;
             }
             match state.devops_from_gitlab_id(member.id) {
@@ -514,23 +513,20 @@ impl GitLabGlue {
 
         debug!("Adding user {} to GitLab group '{}'", user.username, group);
         util::print_diff(
-            &"",
+            "",
             util::format_gitlab_member_access(group, &user.username, access_level).as_str(),
         )?;
-        match action {
-            Action::Apply => {
-                let endpoint = gitlab::api::groups::members::AddGroupMember::builder()
-                    .group(group)
-                    .user(gitlab_id)
-                    .access_level(access_level)
-                    .build()
-                    .unwrap();
-                gitlab::api::ignore(endpoint)
-                    .query_async(&self.client)
-                    .await
-                    .unwrap();
-            }
-            _ => {}
+        if let Action::Apply = action {
+            let endpoint = gitlab::api::groups::members::AddGroupMember::builder()
+                .group(group)
+                .user(gitlab_id)
+                .access_level(access_level)
+                .build()
+                .unwrap();
+            gitlab::api::ignore(endpoint)
+                .query_async(&self.client)
+                .await
+                .unwrap();
         }
         Ok(true)
     }
@@ -550,21 +546,18 @@ impl GitLabGlue {
                 util::access_level_from_u64(member.access_level),
             )
             .as_str(),
-            &"",
+            "",
         )?;
-        match action {
-            Action::Apply => {
-                let endpoint = gitlab::api::groups::members::RemoveGroupMember::builder()
-                    .group(group)
-                    .user(member.id)
-                    .build()
-                    .unwrap();
-                gitlab::api::ignore(endpoint)
-                    .query_async(&self.client)
-                    .await
-                    .unwrap();
-            }
-            _ => {}
+        if let Action::Apply = action {
+            let endpoint = gitlab::api::groups::members::RemoveGroupMember::builder()
+                .group(group)
+                .user(member.id)
+                .build()
+                .unwrap();
+            gitlab::api::ignore(endpoint)
+                .query_async(&self.client)
+                .await
+                .unwrap();
         }
         Ok(true)
     }
@@ -600,20 +593,17 @@ impl GitLabGlue {
             util::format_gitlab_member_access(group, &user.username, expected_access_level)
                 .as_str(),
         )?;
-        match action {
-            Action::Apply => {
-                let endpoint = gitlab::api::groups::members::EditGroupMember::builder()
-                    .group(group)
-                    .user(group_member.id)
-                    .access_level(expected_access_level)
-                    .build()
-                    .unwrap();
-                gitlab::api::ignore(endpoint)
-                    .query_async(&self.client)
-                    .await
-                    .unwrap();
-            }
-            _ => {}
+        if let Action::Apply = action {
+            let endpoint = gitlab::api::groups::members::EditGroupMember::builder()
+                .group(group)
+                .user(group_member.id)
+                .access_level(expected_access_level)
+                .build()
+                .unwrap();
+            gitlab::api::ignore(endpoint)
+                .query_async(&self.client)
+                .await
+                .unwrap();
         }
         Ok(true)
     }
@@ -666,23 +656,20 @@ impl GitLabGlue {
             user.username, project
         );
         util::print_diff(
-            &"",
+            "",
             util::format_gitlab_member_access(project, &user.username, access_level).as_str(),
         )?;
-        match action {
-            Action::Apply => {
-                let endpoint = gitlab::api::projects::members::AddProjectMember::builder()
-                    .project(project)
-                    .user(gitlab_id)
-                    .access_level(access_level)
-                    .build()
-                    .unwrap();
-                gitlab::api::ignore(endpoint)
-                    .query_async(&self.client)
-                    .await
-                    .unwrap();
-            }
-            _ => {}
+        if let Action::Apply = action {
+            let endpoint = gitlab::api::projects::members::AddProjectMember::builder()
+                .project(project)
+                .user(gitlab_id)
+                .access_level(access_level)
+                .build()
+                .unwrap();
+            gitlab::api::ignore(endpoint)
+                .query_async(&self.client)
+                .await
+                .unwrap();
         }
         Ok(true)
     }
@@ -704,21 +691,18 @@ impl GitLabGlue {
                 util::access_level_from_u64(member.access_level),
             )
             .as_str(),
-            &"",
+            "",
         )?;
-        match action {
-            Action::Apply => {
-                let endpoint = gitlab::api::projects::members::RemoveProjectMember::builder()
-                    .project(project)
-                    .user(member.id)
-                    .build()
-                    .unwrap();
-                gitlab::api::ignore(endpoint)
-                    .query_async(&self.client)
-                    .await
-                    .unwrap();
-            }
-            _ => {}
+        if let Action::Apply = action {
+            let endpoint = gitlab::api::projects::members::RemoveProjectMember::builder()
+                .project(project)
+                .user(member.id)
+                .build()
+                .unwrap();
+            gitlab::api::ignore(endpoint)
+                .query_async(&self.client)
+                .await
+                .unwrap();
         }
         Ok(true)
     }
@@ -756,19 +740,16 @@ impl GitLabGlue {
             .as_str(),
             util::format_gitlab_member_access(project, &user.username, access_level).as_str(),
         )?;
-        match action {
-            Action::Apply => {
-                let endpoint = gitlab::api::projects::members::EditProjectMember::builder()
-                    .project(project)
-                    .user(gitlab_id)
-                    .access_level(access_level)
-                    .build()
-                    .unwrap();
-                gitlab::api::ignore(endpoint)
-                    .query_async(&self.client)
-                    .await?;
-            }
-            _ => {}
+        if let Action::Apply = action {
+            let endpoint = gitlab::api::projects::members::EditProjectMember::builder()
+                .project(project)
+                .user(gitlab_id)
+                .access_level(access_level)
+                .build()
+                .unwrap();
+            gitlab::api::ignore(endpoint)
+                .query_async(&self.client)
+                .await?;
         }
         Ok(true)
     }
@@ -826,19 +807,16 @@ impl GitLabGlue {
             )
             .as_str(),
         )?;
-        match action {
-            Action::Apply => {
-                let endpoint = gitlab::api::projects::EditProject::builder()
-                    .project(project.id)
-                    .request_access_enabled(expected_request_access_enabled)
-                    .snippets_access_level(expected_snippets_access_level.as_gitlab_type())
-                    .build()
-                    .unwrap();
-                gitlab::api::ignore(endpoint)
-                    .query_async(&self.client)
-                    .await?;
-            }
-            _ => {}
+        if let Action::Apply = action {
+            let endpoint = gitlab::api::projects::EditProject::builder()
+                .project(project.id)
+                .request_access_enabled(expected_request_access_enabled)
+                .snippets_access_level(expected_snippets_access_level.as_gitlab_type())
+                .build()
+                .unwrap();
+            gitlab::api::ignore(endpoint)
+                .query_async(&self.client)
+                .await?;
         }
         Ok(true)
     }
@@ -851,15 +829,13 @@ fn is_archlinux_bot(member: &GitLabMember) -> bool {
     if member.username.eq(GITLAB_BOT) {
         return true;
     }
-    // TODO: find a better way for project token users
-    // This is not nicely maintainable nor safe to do by regex
-    if vec![
-        "project_10185_bot2".to_string(),
-        "project_19591_bot".to_string(),
-    ]
-    .contains(&member.username)
-    {
-        return true;
+    let bot_users_list = env::var_os("GLUEBUDDY_GITLAB_BOT_USERS");
+    if let Some(list) = bot_users_list {
+        return list
+            .into_string()
+            .unwrap()
+            .split(',')
+            .any(|bot_name| member.username.eq(bot_name));
     }
     false
 }
@@ -939,4 +915,44 @@ fn protect_tag(client: &Gitlab, project: &GroupProjects, tag: &str) -> Result<Pr
         .unwrap();
     let result: ProtectedTag = endpoint.query(client)?;
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+    use serial_test::serial;
+
+    const SOME_KNOWN_BOTS: &str = "project_10185_bot2,project_19591_bot,project_19796_bot,renovate";
+
+    #[rstest]
+    #[case(None, GITLAB_OWNER, true)]
+    #[case(None, GITLAB_BOT, true)]
+    #[case(Some(SOME_KNOWN_BOTS), "renovate", true)]
+    #[case(Some(SOME_KNOWN_BOTS), "renovate_kitty", false)]
+    #[case(Some(SOME_KNOWN_BOTS), "project_10185_bot2", true)]
+    #[case(Some(SOME_KNOWN_BOTS), "project_19591_bot", true)]
+    #[case(Some(SOME_KNOWN_BOTS), "project_19796_bot", true)]
+    #[case(None, "test_bot_user", false)]
+    #[case(Some("another_test_user"), "test_bot_user", false)]
+    #[case(Some(SOME_KNOWN_BOTS), "test_bot_user", false)]
+    #[serial]
+    fn is_archlinux_bot_test(
+        #[case] bot_users_env: Option<&str>,
+        #[case] username: &str,
+        #[case] expected: bool,
+    ) {
+        match bot_users_env {
+            None => env::remove_var("GLUEBUDDY_GITLAB_BOT_USERS"),
+            Some(x) => env::set_var("GLUEBUDDY_GITLAB_BOT_USERS", x),
+        }
+        let member = GitLabMember {
+            id: 0,
+            username: String::from(username),
+            name: String::from(""),
+            email: None,
+            access_level: 0,
+        };
+        assert_eq!(is_archlinux_bot(&member), expected);
+    }
 }
