@@ -12,7 +12,7 @@ publish = false
 keycloak = "17.0"
 gitlab = "0.1500.0"
 reqwest = "0.11.10"
-tokio = { version = "1.19.1", features = ["rt-multi-thread", "macros", "sync"] }
+tokio = { version = "1.20.4", features = ["rt-multi-thread", "macros", "sync"] }
 futures = "0.3.21"
 anyhow = "1.0.57"
 log = "0.4.17"
